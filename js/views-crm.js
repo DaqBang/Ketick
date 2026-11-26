@@ -3,6 +3,7 @@ import * as cash from './cash.js';
 import * as contacts from './customers.js';
 import * as billing from './billing.js';
 import * as jobs from './jobs.js';
+import * as sales from './sales.js';
 import { copyText } from './share.js';
 import { esc, go, refresh, toast, safe, fmtTime, input, btn, card } from './ui.js';
 
@@ -131,7 +132,7 @@ export function viewCrmEdit(user, param) {
 export function viewContact(user, id) {
   const c = contacts.find(id);
   if (!c) return { html: `<div class="${card}">Kenalan tidak dijumpai.</div>` };
-  const { docs, jobs: jobList } = contacts.history(id);
+  const { docs, jobs: jobList, sales: saleList } = contacts.history(id);
   const owing = billing.outstanding().filter((s) => s.doc.party.id === id);
   const owingTotal = owing.reduce((t, s) => t + s.balance, 0);
   const mgr = cash.isManager(user);
@@ -171,7 +172,8 @@ export function viewContact(user, id) {
         isSup
           ? `<button data-new="PO" class="${btn}">+ Pesanan Belian</button>`
           : `<button data-new="QT" class="${btn}">+ Sebut Harga</button>
-             <button data-new="INV" class="${btn}">+ Invois</button>`
+             <button data-new="INV" class="${btn}">+ Invois</button>
+             <a href="#/job-new/${c.id}" class="${btn} block text-center col-span-2">+ Job Repair / Pemasangan</a>`
       }
     </div>
 
@@ -197,7 +199,7 @@ export function viewContact(user, id) {
       isSup
         ? ''
         : `<div class="${card} divide-y">
-      <h2 class="font-bold pb-2">Job (ikut no. telefon)</h2>
+      <h2 class="font-bold pb-2">Job</h2>
       ${
         jobList
           .map((j) => {
@@ -208,6 +210,20 @@ export function viewContact(user, id) {
               <div class="text-xs">${jobs.STATUS[s.status]}</div></a>`;
           })
           .join('') || '<div class="text-sm text-slate-400 py-2">Tiada job</div>'
+      }
+    </div>
+    <div class="${card} divide-y">
+      <h2 class="font-bold pb-2">Jualan POS</h2>
+      ${
+        saleList
+          .map((s) => {
+            const r = sales.refundOf(s.id);
+            return `<a href="#/receipt/${s.id}" class="py-2 flex justify-between text-sm">
+              <div><div class="font-medium">${s.no}${r ? ' <span class="text-xs text-red-600">DIPULANGKAN</span>' : ''}</div>
+              <div class="text-xs text-slate-500">${fmtTime(s.created_at)} · ${s.lines.map((l) => esc(l.name)).join(', ')}</div></div>
+              <div class="font-bold ${r ? 'line-through text-slate-400' : ''}">${cash.fmtRM(s.total)}</div></a>`;
+          })
+          .join('') || '<div class="text-sm text-slate-400 py-2">Tiada jualan</div>'
       }
     </div>`
     }
