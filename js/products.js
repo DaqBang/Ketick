@@ -5,6 +5,7 @@
 import { db } from './db.js';
 import { log } from './audit.js';
 import { session } from './session.js';
+import { balance } from './stock.js';
 
 function requireManager() {
   const u = session.get();
@@ -17,12 +18,12 @@ export const list = (includeInactive = false) =>
 
 export const find = (id) => db.find('products', id);
 
-function validate({ name, sku, price, cost }) {
+function validate({ name, sku, price, cost, track_serial }) {
   if (!name?.trim()) throw new Error('Nama produk diperlukan');
   if (!Number.isInteger(price) || price < 0) throw new Error('Harga tidak sah');
   if (!Number.isInteger(cost) || cost < 0) throw new Error('Kos tidak sah');
   const s = sku?.trim() || '';
-  return { name: name.trim(), sku: s, price, cost };
+  return { name: name.trim(), sku: s, price, cost, track_serial: !!track_serial };
 }
 
 export async function save(data) {
@@ -40,8 +41,12 @@ export async function save(data) {
 
   const old = db.find('products', data.id);
   if (!old) throw new Error('Produk tidak dijumpai');
+  if (!!old.track_serial !== p.track_serial && balance(old.id) !== 0) {
+    throw new Error('Tidak boleh tukar jenis siri selagi ada stok');
+  }
   const rec = db.update('products', data.id, p);
-  const changed = Object.keys(p).filter((k) => old[k] !== p[k]);
+  const norm = (k, v) => (k === 'track_serial' ? !!v : v);
+  const changed = Object.keys(p).filter((k) => norm(k, old[k]) !== p[k]);
   if (changed.includes('price')) {
     await log('product.price', {
       product_id: rec.id,
