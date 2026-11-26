@@ -3,37 +3,11 @@ import { db } from './db.js';
 import { verify } from './audit.js';
 import * as auth from './auth.js';
 import * as cash from './cash.js';
+import * as sales from './sales.js';
+import { esc, go, toast, safe, fmtTime, input, btn, card } from './ui.js';
+import { viewSales, viewReceipt, viewRefund, viewProducts } from './views-sales.js';
 
 const $app = document.getElementById('app');
-
-export const esc = (s) =>
-  String(s ?? '').replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
-  );
-
-const go = (path) => (location.hash = '#' + path);
-
-function toast(msg, type = 'error') {
-  const el = document.createElement('div');
-  el.className = `fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg text-white text-sm shadow-lg ${
-    type === 'error' ? 'bg-red-600' : 'bg-emerald-600'
-  }`;
-  el.textContent = msg;
-  document.body.appendChild(el);
-  setTimeout(() => el.remove(), 3000);
-}
-
-// Jalankan fungsi async; papar ralat sebagai toast
-const safe = (fn) => async (...a) => {
-  try {
-    await fn(...a);
-  } catch (e) {
-    toast(e.message);
-  }
-};
-
-const fmtTime = (iso) =>
-  new Date(iso).toLocaleString('ms-MY', { dateStyle: 'short', timeStyle: 'short' });
 
 const ACTION_LABEL = {
   setup: 'Sistem disediakan',
@@ -53,6 +27,14 @@ const ACTION_LABEL = {
   'cash.reverse': 'Rekod tunai dibatal',
   'cash.close': 'Syif ditutup',
   'cash.variance': 'Tunai tidak padan',
+  'sale.create': 'Jualan',
+  'sale.discount': 'Diskaun diluluskan',
+  'sale.refund': 'Pulangan jualan',
+  'product.create': 'Produk ditambah',
+  'product.update': 'Produk dikemas kini',
+  'product.price': 'Harga produk diubah',
+  'product.deactivate': 'Produk dinyahaktif',
+  'product.activate': 'Produk diaktifkan',
 };
 const ALERT_ACTIONS = new Set([
   'auth.fail',
@@ -60,11 +42,10 @@ const ALERT_ACTIONS = new Set([
   'user.deactivate',
   'cash.reverse',
   'cash.variance',
+  'sale.discount',
+  'sale.refund',
+  'product.price',
 ]);
-
-const input = 'w-full border border-slate-300 rounded-lg px-3 py-2';
-const btn = 'w-full bg-slate-900 text-white rounded-lg py-2 font-medium active:scale-95';
-const card = 'bg-white rounded-xl shadow-sm p-4';
 
 // ---------- Layout ----------
 
@@ -78,18 +59,18 @@ const NAV = [
 
 function shell(body, path, user) {
   return `
-  <header class="bg-slate-900 text-white px-4 py-3 flex justify-between items-center sticky top-0 z-10">
+  <header class="print:hidden bg-slate-900 text-white px-4 py-3 flex justify-between items-center sticky top-0 z-10">
     <div>
       <div class="font-bold">${esc(auth.company())}</div>
       <div class="text-xs text-slate-300">${esc(user.name)} · ${auth.ROLES[user.role]}</div>
     </div>
   </header>
   <main class="p-4 pb-24 max-w-2xl mx-auto space-y-4">${body}</main>
-  <nav class="fixed bottom-0 inset-x-0 bg-white border-t grid grid-cols-5 text-xs">
+  <nav class="print:hidden fixed bottom-0 inset-x-0 bg-white border-t grid grid-cols-5 text-xs">
     ${NAV.map(
       ([p, label, icon]) => `
       <a href="#${p}" class="py-2 flex flex-col items-center ${
-        p === path ? 'text-slate-900 font-bold' : 'text-slate-500'
+        p === '/' + path.split('/')[1] ? 'text-slate-900 font-bold' : 'text-slate-500'
       }"><span class="text-lg">${icon}</span>${label}</a>`
     ).join('')}
   </nav>`;
@@ -154,6 +135,7 @@ async function viewHome(user) {
   const chain = await verify();
   const fails = db.where('audit_log', (e) => ALERT_ACTIONS.has(e.action)).length;
   const shift = cash.currentShift();
+  const today = sales.todaySummary();
   return {
     html: `
     <div class="${card}">
@@ -171,8 +153,17 @@ async function viewHome(user) {
       <a href="#/audit" class="${card}">
         <div class="text-xs text-slate-500">Amaran</div>
         <div class="text-lg font-bold ${fails ? 'text-amber-600' : ''}">${fails}</div>
-        <div class="text-xs text-slate-400">PIN, batal, tunai</div>
+        <div class="text-xs text-slate-400">PIN, batal, tunai, diskaun</div>
       </a>
+      ${
+        cash.isManager(user)
+          ? `<a href="#/sales" class="${card} col-span-2">
+        <div class="text-xs text-slate-500">Jualan bersih hari ini</div>
+        <div class="text-lg font-bold">${cash.fmtRM(today.net)}</div>
+        <div class="text-xs text-slate-400">${today.count} resit · pulangan ${cash.fmtRM(today.refunds)}</div>
+      </a>`
+          : ''
+      }
       <a href="#/cash" class="${card} col-span-2">
         <div class="text-xs text-slate-500">Syif tunai</div>
         <div class="font-bold">${
@@ -291,6 +282,7 @@ function viewUsers(user) {
 function viewMore(user) {
   const items = [
     ['/cash', '💵 Tunai & Syif'],
+    ['/products', '🏷️ Produk & Harga'],
     ['/audit', '🔒 Log Audit'],
     ...(user.role === 'owner' ? [['/users', '👥 Pengguna']] : []),
   ];
@@ -393,7 +385,7 @@ function viewCash(user) {
         .filter((m) => m.type !== 'reverse')
         .map((m) => {
           const gone = reversed.has(m.id);
-          const minus = ['out', 'deposit', 'drawing'].includes(m.type);
+          const minus = ['out', 'deposit', 'drawing', 'refund'].includes(m.type);
           return `
         <div class="py-2 text-sm flex justify-between items-start gap-2">
           <div class="${gone ? 'line-through text-slate-400' : ''}">
@@ -407,7 +399,7 @@ function viewCash(user) {
               ${minus ? '-' : ''}${cash.fmtRM(m.amount)}
             </div>
             ${
-              mgr && !gone && m.type !== 'open'
+              mgr && !gone && !['open', 'sale', 'refund'].includes(m.type)
                 ? `<button data-rev="${m.id}" class="text-xs text-red-600 underline">Batal</button>`
                 : ''
             }
@@ -479,7 +471,10 @@ const routes = {
   '/setup': viewSetup,
   '/login': viewLogin,
   '/': viewHome,
-  '/sales': soon('Jualan'),
+  '/sales': viewSales,
+  '/receipt': viewReceipt,
+  '/refund': viewRefund,
+  '/products': viewProducts,
   '/stock': soon('Stok'),
   '/jobs': soon('Job Order'),
   '/cash': viewCash,
@@ -492,6 +487,9 @@ const OWNER_ONLY = new Set(['/users']);
 
 async function render() {
   const path = location.hash.slice(1) || '/';
+  // '/receipt/ID' -> base '/receipt', param 'ID'
+  const [, seg = '', param] = path.match(/^\/([^/]*)\/?(.*)$/) || [];
+  const base = '/' + seg;
   const ready = auth.isSetup();
   const user = auth.current();
 
@@ -501,8 +499,8 @@ async function render() {
   if (user && path === '/login') return go('/');
   if (OWNER_ONLY.has(path) && user.role !== 'owner') return go('/');
 
-  const view = routes[path] || soon('Tidak dijumpai');
-  const { html, mount } = await view(user);
+  const view = routes[base] || soon('Tidak dijumpai');
+  const { html, mount } = await view(user, param || null);
   $app.innerHTML = PUBLIC.has(path) ? html : shell(html, path, user);
   mount?.();
 }
