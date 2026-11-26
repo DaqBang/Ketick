@@ -16,6 +16,7 @@ const LOCKED = new Set([
   'stock_counts',
   'jobs',
   'job_events',
+  'alert_reviews',
   'cash_moves',
 ]);
 
