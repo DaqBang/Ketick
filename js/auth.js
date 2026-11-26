@@ -73,6 +73,28 @@ export async function logout() {
   session.clear();
 }
 
+// Kelulusan bersemuka: manager/owner masukkan PIN pada device kaunter.
+// Tidak tukar sesi login. PIN salah dikira sama seperti login gagal.
+export const approvers = () =>
+  db.where('users', (u) => u.active && (u.role === 'owner' || u.role === 'manager'));
+
+export async function verifyApprover(userId, pin) {
+  const u = db.find('users', userId);
+  if (!u || !u.active || !['owner', 'manager'].includes(u.role)) {
+    throw new Error('Pelulus tidak sah');
+  }
+  if (u.role !== 'owner' && u.fails >= MAX_FAIL) throw new Error('Akaun pelulus dikunci');
+  const who = { id: u.id, name: u.name };
+  if ((await hashPin(String(pin ?? ''), u.salt)) !== u.pin_hash) {
+    const fails = u.fails + 1;
+    db.update('users', u.id, { fails });
+    await log('auth.fail', { fails, context: 'kelulusan' }, who);
+    throw new Error('PIN pelulus salah');
+  }
+  db.update('users', u.id, { fails: 0 });
+  return { id: u.id, name: u.name, role: u.role };
+}
+
 function requireOwner() {
   if (!can('owner')) throw new Error('Hanya owner dibenarkan');
 }
