@@ -2,6 +2,7 @@
 import { db } from './db.js';
 import { verify } from './audit.js';
 import * as auth from './auth.js';
+import * as cash from './cash.js';
 
 const $app = document.getElementById('app');
 
@@ -44,8 +45,22 @@ const ACTION_LABEL = {
   'auth.login': 'Log masuk',
   'auth.logout': 'Log keluar',
   'auth.fail': 'PIN salah',
+  'cash.open': 'Syif dibuka',
+  'cash.in': 'Tunai masuk',
+  'cash.out': 'Belanja tunai',
+  'cash.deposit': 'Masuk bank',
+  'cash.drawing': 'Pengeluaran owner',
+  'cash.reverse': 'Rekod tunai dibatal',
+  'cash.close': 'Syif ditutup',
+  'cash.variance': 'Tunai tidak padan',
 };
-const ALERT_ACTIONS = new Set(['auth.fail', 'user.locked', 'user.deactivate']);
+const ALERT_ACTIONS = new Set([
+  'auth.fail',
+  'user.locked',
+  'user.deactivate',
+  'cash.reverse',
+  'cash.variance',
+]);
 
 const input = 'w-full border border-slate-300 rounded-lg px-3 py-2';
 const btn = 'w-full bg-slate-900 text-white rounded-lg py-2 font-medium active:scale-95';
@@ -138,6 +153,7 @@ function viewLogin() {
 async function viewHome(user) {
   const chain = await verify();
   const fails = db.where('audit_log', (e) => ALERT_ACTIONS.has(e.action)).length;
+  const shift = cash.currentShift();
   return {
     html: `
     <div class="${card}">
@@ -155,10 +171,26 @@ async function viewHome(user) {
       <a href="#/audit" class="${card}">
         <div class="text-xs text-slate-500">Amaran</div>
         <div class="text-lg font-bold ${fails ? 'text-amber-600' : ''}">${fails}</div>
-        <div class="text-xs text-slate-400">PIN salah / kunci</div>
+        <div class="text-xs text-slate-400">PIN, batal, tunai</div>
+      </a>
+      <a href="#/cash" class="${card} col-span-2">
+        <div class="text-xs text-slate-500">Syif tunai</div>
+        <div class="font-bold">${
+          shift ? `Dibuka oleh ${esc(shift.user_name)} · ${fmtTime(shift.opened_at)}` : 'Tiada syif dibuka'
+        }</div>
       </a>
     </div>`,
   };
+}
+
+function auditMoney(d = {}) {
+  if (typeof d.variance === 'number' && typeof d.counted !== 'number') {
+    return ` · beza ${cash.fmtRM(d.variance)}`;
+  }
+  if (typeof d.counted === 'number') {
+    return ` · kira ${cash.fmtRM(d.counted)} / jangka ${cash.fmtRM(d.expected)}`;
+  }
+  return typeof d.amount === 'number' ? ` · ${cash.fmtRM(d.amount)}` : '';
 }
 
 async function viewAudit(user) {
@@ -187,7 +219,7 @@ async function viewAudit(user) {
           </div>
           <div class="text-xs text-slate-500">${esc(e.actor_name)}${
               e.detail?.name ? ` → ${esc(e.detail.name)}` : ''
-            }</div>
+            }${auditMoney(e.detail)}${e.detail?.note ? ` · ${esc(e.detail.note)}` : ''}</div>
         </div>`
           )
           .join('') || '<div class="text-sm text-slate-400">Tiada rekod</div>'
@@ -277,6 +309,165 @@ function viewMore(user) {
   };
 }
 
+function viewCash(user) {
+  const sh = cash.currentShift();
+  const mgr = cash.isManager(user);
+
+  if (!sh) {
+    const history = mgr ? cash.closedShifts() : [];
+    return {
+      html: `
+      <form id="open" class="${card} space-y-3">
+        <h2 class="font-bold">Buka Syif</h2>
+        <p class="text-sm text-slate-500">Kira duit dalam laci sebelum mula.</p>
+        <input name="float" inputmode="decimal" class="${input}" placeholder="Float (RM)" required>
+        <button class="${btn}">Buka Syif</button>
+      </form>
+      ${
+        history.length
+          ? `<div class="${card} divide-y">
+          <h2 class="font-bold pb-2">Sejarah Syif</h2>
+          ${history
+            .map(
+              (h) => `
+            <div class="py-2 text-sm">
+              <div class="flex justify-between">
+                <span>${esc(h.opened_by)}</span>
+                <span class="font-bold ${
+                  Math.abs(h.variance) > cash.VARIANCE_LIMIT ? 'text-red-600' : 'text-emerald-600'
+                }">${h.variance === 0 ? 'Tepat' : cash.fmtRM(h.variance)}</span>
+              </div>
+              <div class="text-xs text-slate-500">
+                ${fmtTime(h.opened_at)} – ${fmtTime(h.closed_at)} · kira ${cash.fmtRM(h.counted)} / jangka ${cash.fmtRM(h.expected)}
+              </div>
+            </div>`
+            )
+            .join('')}
+        </div>`
+          : ''
+      }`,
+      mount() {
+        document.getElementById('open').onsubmit = safe(async (ev) => {
+          ev.preventDefault();
+          await cash.startShift(cash.toSen(new FormData(ev.target).get('float')));
+          toast('Syif dibuka', 'ok');
+          render();
+        });
+      },
+    };
+  }
+
+  const moves = cash.shiftMoves(sh.id).reverse();
+  const reversed = cash.reversedIds(moves);
+  const canUse = sh.user_id === user.id || mgr;
+  const types = ['in', 'out', 'deposit', ...(user.role === 'owner' ? ['drawing'] : [])];
+
+  return {
+    html: `
+    <div class="${card}">
+      <div class="text-xs text-slate-500">Syif dibuka</div>
+      <div class="font-bold">${esc(sh.user_name)} · ${fmtTime(sh.opened_at)}</div>
+      ${
+        mgr
+          ? `<div class="mt-2 text-sm">Dijangka dalam laci: <b>${cash.fmtRM(cash.expected(sh.id))}</b></div>`
+          : '<div class="mt-2 text-xs text-slate-400">Kiraan buta: jumlah dijangka hanya dilihat manager.</div>'
+      }
+    </div>
+    ${
+      canUse
+        ? `
+    <form id="move" class="${card} space-y-3">
+      <h2 class="font-bold">Rekod Tunai</h2>
+      <select name="type" class="${input}">
+        ${types.map((t) => `<option value="${t}">${cash.TYPES[t]}</option>`).join('')}
+      </select>
+      <input name="amount" inputmode="decimal" class="${input}" placeholder="Jumlah (RM)" required>
+      <input name="note" class="${input}" placeholder="Sebab / catatan (wajib)" required>
+      <button class="${btn}">Simpan</button>
+    </form>`
+        : `<div class="${card} text-sm text-amber-700">Syif ini milik ${esc(sh.user_name)}.</div>`
+    }
+    <div class="${card} divide-y">
+      <h2 class="font-bold pb-2">Pergerakan</h2>
+      ${moves
+        .filter((m) => m.type !== 'reverse')
+        .map((m) => {
+          const gone = reversed.has(m.id);
+          const minus = ['out', 'deposit', 'drawing'].includes(m.type);
+          return `
+        <div class="py-2 text-sm flex justify-between items-start gap-2">
+          <div class="${gone ? 'line-through text-slate-400' : ''}">
+            <div class="font-medium">${cash.TYPES[m.type]}</div>
+            <div class="text-xs text-slate-500">${esc(m.user_name)} · ${fmtTime(m.created_at)}${
+            m.note ? ` · ${esc(m.note)}` : ''
+          }</div>
+          </div>
+          <div class="text-right">
+            <div class="font-bold ${gone ? 'line-through text-slate-400' : minus ? 'text-red-600' : ''}">
+              ${minus ? '-' : ''}${cash.fmtRM(m.amount)}
+            </div>
+            ${
+              mgr && !gone && m.type !== 'open'
+                ? `<button data-rev="${m.id}" class="text-xs text-red-600 underline">Batal</button>`
+                : ''
+            }
+          </div>
+        </div>`;
+        })
+        .join('')}
+    </div>
+    ${
+      canUse
+        ? `
+    <form id="close" class="${card} space-y-3 border-2 border-slate-900">
+      <h2 class="font-bold">Tutup Syif</h2>
+      <p class="text-sm text-slate-500">Kira semua tunai dalam laci, masukkan jumlah sebenar.</p>
+      <input name="counted" inputmode="decimal" class="${input}" placeholder="Jumlah dikira (RM)" required>
+      <input name="note" class="${input}" placeholder="Catatan (pilihan)">
+      <button class="${btn}">Tutup Syif</button>
+    </form>`
+        : ''
+    }`,
+    mount() {
+      const move = document.getElementById('move');
+      if (move) {
+        move.onsubmit = safe(async (ev) => {
+          ev.preventDefault();
+          const d = Object.fromEntries(new FormData(ev.target));
+          await cash.addMove(d.type, cash.toSen(d.amount), d.note);
+          toast('Disimpan', 'ok');
+          render();
+        });
+      }
+      $app.querySelectorAll('[data-rev]').forEach(
+        (b) =>
+          (b.onclick = safe(async () => {
+            const reason = prompt('Sebab batal rekod ini?');
+            if (reason === null) return;
+            await cash.reverseMove(b.dataset.rev, reason);
+            toast('Rekod dibatal (direkod dalam audit)', 'ok');
+            render();
+          }))
+      );
+      const close = document.getElementById('close');
+      if (close) {
+        close.onsubmit = safe(async (ev) => {
+          ev.preventDefault();
+          const d = Object.fromEntries(new FormData(ev.target));
+          const counted = cash.toSen(d.counted);
+          if (!confirm(`Tutup syif dengan kiraan ${cash.fmtRM(counted)}? Tidak boleh ubah selepas ini.`)) return;
+          const r = await cash.closeShift(counted, d.note);
+          toast(
+            r.variance === 0 ? 'Syif ditutup. Tunai tepat.' : `Syif ditutup. Beza ${cash.fmtRM(r.variance)}`,
+            Math.abs(r.variance) > cash.VARIANCE_LIMIT ? 'error' : 'ok'
+          );
+          render();
+        });
+      }
+    },
+  };
+}
+
 const soon = (title) => () => ({
   html: `<div class="${card}"><h2 class="font-bold">${title}</h2>
     <p class="text-sm text-slate-500">Akan datang.</p></div>`,
@@ -291,7 +482,7 @@ const routes = {
   '/sales': soon('Jualan'),
   '/stock': soon('Stok'),
   '/jobs': soon('Job Order'),
-  '/cash': soon('Tunai & Syif'),
+  '/cash': viewCash,
   '/audit': viewAudit,
   '/users': viewUsers,
   '/more': viewMore,
