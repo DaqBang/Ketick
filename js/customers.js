@@ -79,6 +79,13 @@ export async function save(data) {
   return rec;
 }
 
+// Cari ikut no. telefon; jika tiada, daftar sebagai pelanggan baru
+export async function ensure({ name, phone }) {
+  const found = findByPhone(phone);
+  if (found) return found;
+  return save({ kind: 'customer', name, phone });
+}
+
 export async function setActive(id, active) {
   const u = me();
   if (!(u.role === 'owner' || u.role === 'manager')) throw new Error('Hanya manager/owner');
@@ -120,12 +127,13 @@ export const links = {
 
 export function history(id) {
   const c = find(id);
-  if (!c) return { docs: [], jobs: [] };
+  if (!c) return { docs: [], jobs: [], sales: [] };
   const docs = db
     .where('docs', (d) => d.party?.id === id)
     .reverse();
   const jobs = db
-    .where('jobs', (j) => normPhone(j.phone) === c.phone_norm)
+    .where('jobs', (j) => j.contact_id === id || normPhone(j.phone) === c.phone_norm)
     .reverse();
-  return { docs, jobs };
+  const sales = db.where('sales', (s) => s.party?.id === id).reverse();
+  return { docs, jobs, sales };
 }
