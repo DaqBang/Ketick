@@ -16,12 +16,13 @@ export const TYPES = {
   deposit: 'Masuk bank',
   drawing: 'Pengeluaran owner',
   sale: 'Jualan',
+  refund: 'Pulangan',
   reverse: 'Pembalikan',
   close: 'Tutup syif',
 };
 
 // +1 tambah duit dalam laci, -1 kurang
-const SIGN = { open: 1, in: 1, sale: 1, out: -1, deposit: -1, drawing: -1 };
+const SIGN = { open: 1, in: 1, sale: 1, out: -1, deposit: -1, drawing: -1, refund: -1 };
 const MANUAL = new Set(['in', 'out', 'deposit', 'drawing']);
 
 export function toSen(value) {
@@ -126,6 +127,7 @@ export async function reverseMove(moveId, reason) {
   const sh = currentShift();
   if (!m || !sh || m.shift_id !== sh.id) throw new Error('Hanya rekod syif semasa boleh dibatal');
   if (!SIGN[m.type] || m.type === 'open') throw new Error('Rekod ini tidak boleh dibatal');
+  if (m.type === 'sale' || m.type === 'refund') throw new Error('Guna pulangan di skrin Jualan');
   if (reversedIds(shiftMoves(sh.id)).has(m.id)) throw new Error('Rekod sudah dibatal');
   insertMove(u, sh.id, 'reverse', m.amount, { ref: m.id, note: reason.trim() });
   await log('cash.reverse', {
@@ -136,6 +138,15 @@ export async function reverseMove(moveId, reason) {
     by_original: m.user_name,
     note: reason.trim(),
   });
+}
+
+// Dipanggil oleh sales.js sahaja. Audit direkod di sana (sale.create / sale.refund).
+export function postSale(u, shiftId, sale) {
+  return insertMove(u, shiftId, 'sale', sale.total, { ref: sale.id, note: sale.no });
+}
+
+export function postRefund(u, shiftId, refund) {
+  return insertMove(u, shiftId, 'refund', refund.amount, { ref: refund.id, note: refund.no });
 }
 
 export async function closeShift(countedSen, note = '') {
