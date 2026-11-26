@@ -8,6 +8,7 @@ import { db } from './db.js';
 import { log, verify } from './audit.js';
 import { session } from './session.js';
 import * as jobs from './jobs.js';
+import * as billing from './billing.js';
 import { VARIANCE_LIMIT, fmtRM } from './cash.js';
 
 // Ambang — boleh dijadikan tetapan nanti
@@ -28,6 +29,7 @@ export const CONFIG = {
   openHour: 8,
   closeHour: 22,
   priceFlipHours: 24,
+  invoiceOverdueDays: 30,
 };
 
 export const SEVERITY = {
@@ -309,6 +311,9 @@ export async function findings() {
         link: `#/job/${e.job_id}`,
         at: e.created_at,
       })),
+    ...db
+      .where('docs', (d) => d.type === 'RC' && d.method !== 'cash' && d.pay_ref && !billing.voidOf(d.id))
+      .map((d) => ({ ref: d.pay_ref, doc: d.no, user_id: d.user_id, link: `#/doc/${d.id}`, at: d.created_at })),
   ];
   for (const [ref, list] of Object.entries(groupBy(refs, (r) => r.ref.trim().toUpperCase()))) {
     if (list.length < 2) continue;
@@ -330,6 +335,8 @@ export async function findings() {
     ...sales.filter((s) => s.approved_by?.self),
     ...refunds.filter((r) => r.approved_by?.self),
     ...adjusts.filter((a) => a.approved_by?.self),
+    ...db.where('docs', (d) => inWindow(d) && d.approved_by?.self),
+    ...db.where('doc_voids', (v) => inWindow(v) && v.approved_by?.self),
   ].filter((r) => users[r.user_id]?.role === 'manager');
   for (const [uid, list] of Object.entries(groupBy(selfApproved, (r) => r.user_id))) {
     add({
@@ -343,7 +350,64 @@ export async function findings() {
     });
   }
 
-  // 13. Pengeluaran owner (ketelusan untuk rakan kongsi)
+  // 13. Akaun bank syarikat diubah (lencong bayaran pelanggan)
+  for (const e of db.all('audit_log').filter((e) => e.action === 'company.bank' && t(e.ts) >= since)) {
+    add({
+      key: `company_bank:${e.id}`,
+      rule: 'company_bank',
+      severity: 'high',
+      title: 'Akaun bank pada invois diubah',
+      detail: `${e.detail.note}. Pastikan ini akaun syarikat yang sah.`,
+      who: who(e.actor_id),
+      link: '#/company',
+      ts: e.ts,
+    });
+  }
+
+  // 14. Dokumen billing dibatal & nota kredit
+  for (const v of db.where('doc_voids', inWindow)) {
+    const d = billing.findDoc(v.doc_id);
+    if (!d || !['INV', 'RC', 'CN', 'DO'].includes(d.type)) continue;
+    add({
+      key: `doc_void:${v.id}`,
+      rule: 'doc_void',
+      severity: d.type === 'RC' ? 'high' : 'medium',
+      title: `${d.no} dibatal`,
+      detail: `${billing.TYPES[d.type].label} ${d.total ? fmtRM(d.total) + ' · ' : ''}${d.party?.name} · sebab: ${v.reason} · lulus ${v.approved_by.name}`,
+      who: who(v.user_id),
+      link: `#/doc/${d.id}`,
+      ts: v.created_at,
+    });
+  }
+  for (const cn of db.where('docs', (d) => d.type === 'CN' && inWindow(d) && !billing.voidOf(d.id))) {
+    add({
+      key: `credit_note:${cn.id}`,
+      rule: 'credit_note',
+      severity: 'medium',
+      title: `Nota kredit ${fmtRM(cn.amount)}: ${cn.party?.name}`,
+      detail: `${cn.no} bagi ${cn.invoice_no} · ${cn.reason} · lulus ${cn.approved_by.name}`,
+      who: who(cn.user_id),
+      link: `#/doc/${cn.id}`,
+      ts: cn.created_at,
+    });
+  }
+
+  // 15. Invois lewat bayar terlalu lama
+  for (const s of billing.outstanding()) {
+    const late = now - t(s.doc.due_at);
+    if (late < CONFIG.invoiceOverdueDays * DAY) continue;
+    add({
+      key: `overdue:${s.doc.id}:${s.balance}`,
+      rule: 'overdue',
+      severity: 'low',
+      title: `${s.doc.no} lewat ${Math.floor(late / DAY)} hari`,
+      detail: `${s.doc.party?.name} · baki ${fmtRM(s.balance)}. Pastikan pelanggan tidak bayar tunai kepada staf di luar sistem.`,
+      link: `#/doc/${s.doc.id}`,
+      ts: s.doc.due_at,
+    });
+  }
+
+  // 16. Pengeluaran owner (ketelusan untuk rakan kongsi)
   const reversed = new Set(moves.filter((m) => m.type === 'reverse').map((m) => m.ref));
   const drawings = moves.filter((m) => m.type === 'drawing' && inWindow(m) && !reversed.has(m.id));
   if (drawings.length) {
