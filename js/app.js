@@ -6,6 +6,7 @@ import * as cash from './cash.js';
 import * as sales from './sales.js';
 import { esc, go, toast, safe, fmtTime, input, btn, card } from './ui.js';
 import { viewSales, viewReceipt, viewRefund, viewProducts } from './views-sales.js';
+import { viewStock, viewStockIn, viewStockCount, viewStockAdjust } from './views-stock.js';
 
 const $app = document.getElementById('app');
 
@@ -35,6 +36,11 @@ const ACTION_LABEL = {
   'product.price': 'Harga produk diubah',
   'product.deactivate': 'Produk dinyahaktif',
   'product.activate': 'Produk diaktifkan',
+  'stock.receive': 'Terima stok',
+  'stock.adjust': 'Laras stok',
+  'stock.count': 'Kiraan stok',
+  'stock.variance': 'Stok tidak padan',
+  'stock.count_apply': 'Laras ikut kiraan',
 };
 const ALERT_ACTIONS = new Set([
   'auth.fail',
@@ -45,6 +51,9 @@ const ALERT_ACTIONS = new Set([
   'sale.discount',
   'sale.refund',
   'product.price',
+  'stock.adjust',
+  'stock.variance',
+  'stock.count_apply',
 ]);
 
 // ---------- Layout ----------
@@ -70,7 +79,7 @@ function shell(body, path, user) {
     ${NAV.map(
       ([p, label, icon]) => `
       <a href="#${p}" class="py-2 flex flex-col items-center ${
-        p === '/' + path.split('/')[1] ? 'text-slate-900 font-bold' : 'text-slate-500'
+        (p === '/' ? path === '/' : path.startsWith(p)) ? 'text-slate-900 font-bold' : 'text-slate-500'
       }"><span class="text-lg">${icon}</span>${label}</a>`
     ).join('')}
   </nav>`;
@@ -475,7 +484,10 @@ const routes = {
   '/receipt': viewReceipt,
   '/refund': viewRefund,
   '/products': viewProducts,
-  '/stock': soon('Stok'),
+  '/stock': viewStock,
+  '/stock-in': viewStockIn,
+  '/stock-count': viewStockCount,
+  '/stock-adjust': viewStockAdjust,
   '/jobs': soon('Job Order'),
   '/cash': viewCash,
   '/audit': viewAudit,
