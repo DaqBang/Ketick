@@ -17,6 +17,7 @@ import * as auth from './auth.js';
 import * as cash from './cash.js';
 import * as stock from './stock.js';
 import { needsApproval, METHODS } from './sales.js';
+import * as contacts from './customers.js';
 
 export const TYPES = { repair: 'Repair', install: 'Pemasangan' };
 export const STATUS = {
@@ -115,22 +116,30 @@ function cashShiftFor(u) {
 
 // ---------- Cipta & status ----------
 
-export async function create({ type, customer, phone, device, deviceSerial, address, problem, assignTo }) {
+// contactId: pelanggan dari CRM. Jika kosong, pelanggan dicari ikut no. telefon
+// atau didaftar baru dalam CRM secara automatik.
+export async function create({ type, contactId, customer, phone, device, deviceSerial, address, problem, assignTo }) {
   const u = me();
   if (!TYPES[type]) throw new Error('Jenis job tidak sah');
-  if (!customer?.trim()) throw new Error('Nama pelanggan diperlukan');
-  if (!phone?.trim()) throw new Error('No. telefon pelanggan diperlukan');
   if (!problem?.trim()) throw new Error('Masalah / skop kerja diperlukan');
+  let c = contactId ? contacts.find(contactId) : null;
+  if (contactId && !c) throw new Error('Pelanggan tidak dijumpai');
+  if (!c) {
+    if (!customer?.trim()) throw new Error('Nama pelanggan diperlukan');
+    if (!phone?.trim()) throw new Error('No. telefon pelanggan diperlukan');
+    c = await contacts.ensure({ name: customer, phone });
+  }
   const tech = assignTo ? db.find('users', assignTo) : null;
 
   const job = db.insert('jobs', {
     no: nextNo(),
     type,
-    customer: customer.trim(),
-    phone: phone.trim(),
+    contact_id: c.id,
+    customer: c.name,
+    phone: c.phone,
     device: device?.trim() || '',
     device_serial: deviceSerial?.trim().toUpperCase() || '',
-    address: address?.trim() || '',
+    address: address?.trim() || c.address || '',
     problem: problem.trim(),
     assigned: tech ? { id: tech.id, name: tech.name } : null,
     user_id: u.id,
