@@ -95,6 +95,17 @@ export async function verifyApprover(userId, pin) {
   return { id: u.id, name: u.name, role: u.role };
 }
 
+// Kelulusan tindakan sensitif. Manager/owner lulus sendiri (tetap direkod);
+// staf perlu PIN manager/owner.
+export async function approval(approver) {
+  const u = session.get();
+  if (!u) throw new Error('Sila log masuk');
+  if (u.role === 'owner' || u.role === 'manager') return { id: u.id, name: u.name, self: true };
+  if (!approver?.id) throw new Error('Perlu kelulusan manager/owner');
+  const a = await verifyApprover(approver.id, approver.pin);
+  return { id: a.id, name: a.name, self: false };
+}
+
 function requireOwner() {
   if (!can('owner')) throw new Error('Hanya owner dibenarkan');
 }
