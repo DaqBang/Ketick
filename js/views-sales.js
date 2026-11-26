@@ -4,13 +4,16 @@ import * as cash from './cash.js';
 import * as sales from './sales.js';
 import * as products from './products.js';
 import * as stock from './stock.js';
+import * as contacts from './customers.js';
+import { sharePdf } from './share.js';
+import { contactButtons, wireContactButtons } from './views-crm.js';
 import { esc, go, refresh, toast, safe, fmtTime, input, btn, card } from './ui.js';
 
 // Troli kekal semasa tukar skrin (hilang bila refresh browser)
-const cart = { qty: {}, serials: {}, discount: '', method: 'cash', ref: '' };
+const cart = { qty: {}, serials: {}, discount: '', method: 'cash', ref: '', contactId: '' };
 
 const resetCart = () =>
-  Object.assign(cart, { qty: {}, serials: {}, discount: '', method: 'cash', ref: '' });
+  Object.assign(cart, { qty: {}, serials: {}, discount: '', method: 'cash', ref: '', contactId: '' });
 
 // Buang produk yang sudah dinyahaktif dari troli
 function cartLines() {
@@ -87,6 +90,16 @@ export function viewSales(user) {
 
     <form id="pay" class="${card} space-y-3">
       <h2 class="font-bold">Troli</h2>
+      <div class="flex gap-2">
+        <select id="cust" class="${input}">
+          <option value="">Pelanggan walk-in</option>
+          ${contacts
+            .list({ kind: 'customer' })
+            .map((c) => `<option value="${c.id}" ${c.id === cart.contactId ? 'selected' : ''}>${esc(c.name)} · ${esc(c.phone)}</option>`)
+            .join('')}
+        </select>
+        <a href="#/crm-edit/new-customer" class="px-3 py-2 border rounded-lg text-sm whitespace-nowrap">+ Baru</a>
+      </div>
       ${
         lines
           .map(
@@ -208,6 +221,7 @@ export function viewSales(user) {
         $('ref').classList.toggle('hidden', cart.method === 'cash');
       };
       $('ref').oninput = (ev) => (cart.ref = ev.target.value);
+      $('cust').onchange = (ev) => (cart.contactId = ev.target.value);
       if ($('clear')) {
         $('clear').onclick = () => {
           resetCart();
@@ -229,6 +243,7 @@ export function viewSales(user) {
           discount,
           method: cart.method,
           payRef: cart.ref,
+          contactId: cart.contactId,
           approver,
         });
         resetCart();
@@ -245,10 +260,20 @@ export function viewReceipt(user, id) {
   const s = sales.findSale(id);
   if (!s) return { html: `<div class="${card}">Resit tidak dijumpai.</div>` };
   const r = sales.refundOf(s.id);
+  const contact = s.party ? contacts.find(s.party.id) || s.party : null;
+  const msg = [
+    `Salam ${s.party?.name || ''},`,
+    '',
+    `Resit ${s.no} daripada ${auth.company()}.`,
+    `Jumlah: ${cash.fmtRM(s.total)} (${sales.METHODS[s.method]})`,
+    ...s.lines.filter((l) => l.serials?.length).map((l) => `${l.name} SN: ${l.serials.join(', ')}`),
+    '',
+    'Simpan resit ini untuk tuntutan waranti. Terima kasih.',
+  ].join('\n');
 
   return {
     html: `
-    <div class="${card} space-y-3 font-mono text-sm relative">
+    <div id="receipt" class="${card} space-y-3 font-mono text-sm relative">
       ${
         r
           ? `<div class="absolute top-8 right-4 rotate-12 border-4 border-red-600 text-red-600 font-bold px-2">DIPULANGKAN</div>`
@@ -258,6 +283,7 @@ export function viewReceipt(user, id) {
         <div class="font-bold text-base">${esc(auth.company())}</div>
         <div>Resit ${s.no}</div>
         <div class="text-xs">${fmtTime(s.created_at)} · ${esc(s.user_name)}</div>
+        ${s.party ? `<div class="text-xs">Pelanggan: ${esc(s.party.name)} · ${esc(s.party.phone)}</div>` : ''}
       </div>
       <div class="border-t border-dashed pt-2 space-y-1">
         ${s.lines
@@ -289,6 +315,14 @@ export function viewReceipt(user, id) {
       }
       <div class="text-center text-xs pt-2">Terima kasih</div>
     </div>
+    <div class="print:hidden ${card} space-y-2">
+      <button id="sharePdf" class="${btn}">📄 Kongsi PDF resit</button>
+      ${
+        contact
+          ? contactButtons(contact, { text: msg, subject: `Resit ${s.no}` })
+          : '<div class="text-xs text-slate-500">Walk-in: tiada no. pelanggan. Guna Kongsi PDF.</div>'
+      }
+    </div>
     <div class="print:hidden grid grid-cols-2 gap-2">
       <button id="print" class="${btn}">Cetak</button>
       <a href="#/sales" class="w-full border rounded-lg py-2 text-center">Kembali</a>
@@ -300,6 +334,12 @@ export function viewReceipt(user, id) {
     }`,
     mount() {
       document.getElementById('print').onclick = () => window.print();
+      wireContactButtons(msg);
+      document.getElementById('sharePdf').onclick = safe(async () => {
+        toast('Menjana PDF…', 'ok');
+        const res = await sharePdf(document.getElementById('receipt'), `${s.no}.pdf`, msg);
+        if (res === 'downloaded') toast('PDF dimuat turun. Lampirkan dalam chat.', 'ok');
+      });
     },
   };
 }
