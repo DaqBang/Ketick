@@ -11,6 +11,11 @@ import { viewJobs, viewJobNew, viewJob, viewJobCancel } from './views-jobs.js';
 import * as jobs from './jobs.js';
 import * as fraud from './fraud.js';
 import { viewAlerts } from './views-alerts.js';
+import { viewCrm, viewCrmEdit, viewContact } from './views-crm.js';
+import {
+  viewBilling, viewDocEdit, viewDoc, viewDocDeliver, viewDocVoid, viewCompany,
+} from './views-billing.js';
+import * as billing from './billing.js';
 
 const $app = document.getElementById('app');
 
@@ -56,6 +61,21 @@ const ACTION_LABEL = {
   'job.close': 'Job diserah',
   'job.cancel': 'Job dibatal',
   'alert.review': 'Amaran disemak',
+  'contact.create': 'Kenalan ditambah',
+  'contact.update': 'Kenalan dikemas kini',
+  'contact.activate': 'Kenalan diaktifkan',
+  'contact.deactivate': 'Kenalan dinyahaktif',
+  'company.update': 'Profil syarikat dikemas kini',
+  'company.bank': 'Akaun bank syarikat diubah',
+  'doc.issue': 'Dokumen dikeluarkan',
+  'doc.discount': 'Harga invois bawah senarai (lulus)',
+  'doc.po_price': 'Harga PO atas kos (lulus)',
+  'doc.receipt': 'Resit dikeluarkan',
+  'doc.credit': 'Nota kredit',
+  'doc.deliver': 'Nota hantaran',
+  'doc.void': 'Dokumen dibatal',
+  'doc.share': 'Dokumen dihantar',
+  'doc.draft_discard': 'Draf dibuang',
 };
 const ALERT_ACTIONS = new Set([
   'auth.fail',
@@ -72,6 +92,11 @@ const ALERT_ACTIONS = new Set([
   'job.void',
   'job.discount',
   'job.cancel',
+  'company.bank',
+  'doc.discount',
+  'doc.po_price',
+  'doc.credit',
+  'doc.void',
 ]);
 
 // ---------- Layout ----------
@@ -163,6 +188,8 @@ async function viewHome(user) {
   const mgr = cash.isManager(user);
   const found = mgr ? (await fraud.findings()).filter((f) => !f.review) : [];
   const high = found.filter((f) => f.severity === 'high').length;
+  const owing = mgr ? billing.outstanding() : [];
+  const owingLate = owing.filter((s) => s.overdue).length;
   const shift = cash.currentShift();
   const today = sales.todaySummary();
   return {
@@ -197,6 +224,15 @@ async function viewHome(user) {
         <div class="text-xs text-slate-500">Jualan bersih hari ini</div>
         <div class="text-lg font-bold">${cash.fmtRM(today.net)}</div>
         <div class="text-xs text-slate-400">${today.count} resit · pulangan ${cash.fmtRM(today.refunds)}</div>
+      </a>`
+          : ''
+      }
+      ${
+        mgr
+          ? `<a href="#/billing/INV" class="${card} col-span-2 ${owingLate ? 'ring-2 ring-amber-400' : ''}">
+        <div class="text-xs text-slate-500">Invois tertunggak</div>
+        <div class="text-lg font-bold">${cash.fmtRM(owing.reduce((t, s) => t + s.balance, 0))}</div>
+        <div class="text-xs text-slate-400">${owing.length} invois · ${owingLate} lewat</div>
       </a>`
           : ''
       }
@@ -322,10 +358,12 @@ function viewUsers(user) {
 function viewMore(user) {
   const items = [
     ...(cash.isManager(user) ? [['/alerts', '🚨 Amaran Fraud']] : []),
+    ['/billing', '📑 Billing (Invois, Sebut Harga, DO, PO)'],
+    ['/crm', '👤 CRM (Pelanggan & Pembekal)'],
     ['/cash', '💵 Tunai & Syif'],
     ['/products', '🏷️ Produk & Harga'],
     ['/audit', '🔒 Log Audit'],
-    ...(user.role === 'owner' ? [['/users', '👥 Pengguna']] : []),
+    ...(user.role === 'owner' ? [['/users', '👥 Pengguna'], ['/company', '🏢 Profil Syarikat']] : []),
   ];
   return {
     html: `
@@ -527,6 +565,15 @@ const routes = {
   '/cash': viewCash,
   '/audit': viewAudit,
   '/alerts': viewAlerts,
+  '/billing': viewBilling,
+  '/doc-edit': viewDocEdit,
+  '/doc': viewDoc,
+  '/doc-do': viewDocDeliver,
+  '/doc-void': viewDocVoid,
+  '/company': viewCompany,
+  '/crm': viewCrm,
+  '/crm-edit': viewCrmEdit,
+  '/contact': viewContact,
   '/users': viewUsers,
   '/more': viewMore,
 };
