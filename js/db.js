@@ -8,6 +8,7 @@ const PREFIX = 'kawal:';
 const LOCKED = new Set([
   'audit_log',
   'sales',
+  'refunds',
   'payments',
   'stock_moves',
   'cash_moves',
