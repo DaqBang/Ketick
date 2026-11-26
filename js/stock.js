@@ -21,6 +21,8 @@ export const REASONS = {
   count: 'Laras kiraan',
   job: 'Guna dalam job',
   job_return: 'Pulang dari job',
+  do: 'Nota hantaran',
+  do_void: 'DO dibatal',
 };
 
 function me() {
