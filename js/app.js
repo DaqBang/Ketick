@@ -9,6 +9,8 @@ import { viewSales, viewReceipt, viewRefund, viewProducts } from './views-sales.
 import { viewStock, viewStockIn, viewStockCount, viewStockAdjust } from './views-stock.js';
 import { viewJobs, viewJobNew, viewJob, viewJobCancel } from './views-jobs.js';
 import * as jobs from './jobs.js';
+import * as fraud from './fraud.js';
+import { viewAlerts } from './views-alerts.js';
 
 const $app = document.getElementById('app');
 
@@ -53,6 +55,7 @@ const ACTION_LABEL = {
   'job.payment': 'Bayaran job',
   'job.close': 'Job diserah',
   'job.cancel': 'Job dibatal',
+  'alert.review': 'Amaran disemak',
 };
 const ALERT_ACTIONS = new Set([
   'auth.fail',
@@ -157,7 +160,9 @@ function viewLogin() {
 
 async function viewHome(user) {
   const chain = await verify();
-  const fails = db.where('audit_log', (e) => ALERT_ACTIONS.has(e.action)).length;
+  const mgr = cash.isManager(user);
+  const found = mgr ? (await fraud.findings()).filter((f) => !f.review) : [];
+  const high = found.filter((f) => f.severity === 'high').length;
   const shift = cash.currentShift();
   const today = sales.todaySummary();
   return {
@@ -174,13 +179,20 @@ async function viewHome(user) {
         </div>
         <div class="text-xs text-slate-400">${chain.count} entri</div>
       </a>
-      <a href="#/audit" class="${card}">
-        <div class="text-xs text-slate-500">Amaran</div>
-        <div class="text-lg font-bold ${fails ? 'text-amber-600' : ''}">${fails}</div>
-        <div class="text-xs text-slate-400">PIN, batal, tunai, diskaun</div>
-      </a>
       ${
-        cash.isManager(user)
+        mgr
+          ? `<a href="#/alerts" class="${card} ${high ? 'ring-2 ring-red-500' : ''}">
+        <div class="text-xs text-slate-500">Amaran fraud</div>
+        <div class="text-lg font-bold ${high ? 'text-red-600' : found.length ? 'text-amber-600' : 'text-emerald-600'}">${found.length}</div>
+        <div class="text-xs text-slate-400">${high} tinggi · belum disemak</div>
+      </a>`
+          : `<a href="#/jobs" class="${card}">
+        <div class="text-xs text-slate-500">Job aktif</div>
+        <div class="text-lg font-bold">${jobs.activeCount()}</div>
+      </a>`
+      }
+      ${
+        mgr
           ? `<a href="#/sales" class="${card} col-span-2">
         <div class="text-xs text-slate-500">Jualan bersih hari ini</div>
         <div class="text-lg font-bold">${cash.fmtRM(today.net)}</div>
@@ -309,6 +321,7 @@ function viewUsers(user) {
 
 function viewMore(user) {
   const items = [
+    ...(cash.isManager(user) ? [['/alerts', '🚨 Amaran Fraud']] : []),
     ['/cash', '💵 Tunai & Syif'],
     ['/products', '🏷️ Produk & Harga'],
     ['/audit', '🔒 Log Audit'],
@@ -513,6 +526,7 @@ const routes = {
   '/job-cancel': viewJobCancel,
   '/cash': viewCash,
   '/audit': viewAudit,
+  '/alerts': viewAlerts,
   '/users': viewUsers,
   '/more': viewMore,
 };
