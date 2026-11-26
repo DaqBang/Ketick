@@ -14,6 +14,7 @@ import { session } from './session.js';
 import * as auth from './auth.js';
 import * as cash from './cash.js';
 import * as stock from './stock.js';
+import * as contacts from './customers.js';
 
 export const DISCOUNT_LIMIT_PCT = 10;
 export const METHODS = { cash: 'Tunai', transfer: 'Transfer', card: 'Kad', ewallet: 'e-Wallet' };
@@ -60,8 +61,10 @@ function cashShiftFor(u) {
   return sh;
 }
 
-export async function checkout({ qtyMap, serialMap = {}, discount = 0, method, payRef = '', approver = null }) {
+export async function checkout({ qtyMap, serialMap = {}, discount = 0, method, payRef = '', approver = null, contactId = '' }) {
   const u = me();
+  const c = contactId ? contacts.find(contactId) : null;
+  if (contactId && !c) throw new Error('Pelanggan tidak dijumpai');
   const lines = buildLines(qtyMap, serialMap);
   if (!lines.length) throw new Error('Troli kosong');
   for (const l of lines) stock.checkAvailable(db.find('products', l.product_id), l.qty, l.serials);
@@ -88,6 +91,7 @@ export async function checkout({ qtyMap, serialMap = {}, discount = 0, method, p
     user_id: u.id,
     user_name: u.name,
     approved_by: approvedBy,
+    party: c ? contacts.snapshot(c) : null,
   });
 
   for (const l of lines) stock.postOut(u, l, 'sale', sale.id);
