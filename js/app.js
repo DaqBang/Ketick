@@ -7,6 +7,8 @@ import * as sales from './sales.js';
 import { esc, go, toast, safe, fmtTime, input, btn, card } from './ui.js';
 import { viewSales, viewReceipt, viewRefund, viewProducts } from './views-sales.js';
 import { viewStock, viewStockIn, viewStockCount, viewStockAdjust } from './views-stock.js';
+import { viewJobs, viewJobNew, viewJob, viewJobCancel } from './views-jobs.js';
+import * as jobs from './jobs.js';
 
 const $app = document.getElementById('app');
 
@@ -41,6 +43,16 @@ const ACTION_LABEL = {
   'stock.count': 'Kiraan stok',
   'stock.variance': 'Stok tidak padan',
   'stock.count_apply': 'Laras ikut kiraan',
+  'job.create': 'Job dicipta',
+  'job.status': 'Status job',
+  'job.assign': 'Job ditugaskan',
+  'job.part': 'Part guna dalam job',
+  'job.charge': 'Caj job',
+  'job.void': 'Baris job dibuang',
+  'job.discount': 'Diskaun job',
+  'job.payment': 'Bayaran job',
+  'job.close': 'Job diserah',
+  'job.cancel': 'Job dibatal',
 };
 const ALERT_ACTIONS = new Set([
   'auth.fail',
@@ -54,6 +66,9 @@ const ALERT_ACTIONS = new Set([
   'stock.adjust',
   'stock.variance',
   'stock.count_apply',
+  'job.void',
+  'job.discount',
+  'job.cancel',
 ]);
 
 // ---------- Layout ----------
@@ -79,7 +94,7 @@ function shell(body, path, user) {
     ${NAV.map(
       ([p, label, icon]) => `
       <a href="#${p}" class="py-2 flex flex-col items-center ${
-        (p === '/' ? path === '/' : path.startsWith(p)) ? 'text-slate-900 font-bold' : 'text-slate-500'
+        (p === '/' ? path === '/' : path.startsWith(p.replace(/s$/, ''))) ? 'text-slate-900 font-bold' : 'text-slate-500'
       }"><span class="text-lg">${icon}</span>${label}</a>`
     ).join('')}
   </nav>`;
@@ -173,6 +188,10 @@ async function viewHome(user) {
       </a>`
           : ''
       }
+      <a href="#/jobs" class="${card} col-span-2">
+        <div class="text-xs text-slate-500">Job aktif</div>
+        <div class="font-bold">${jobs.activeCount()} job belum diserah</div>
+      </a>
       <a href="#/cash" class="${card} col-span-2">
         <div class="text-xs text-slate-500">Syif tunai</div>
         <div class="font-bold">${
@@ -394,7 +413,7 @@ function viewCash(user) {
         .filter((m) => m.type !== 'reverse')
         .map((m) => {
           const gone = reversed.has(m.id);
-          const minus = ['out', 'deposit', 'drawing', 'refund'].includes(m.type);
+          const minus = ['out', 'deposit', 'drawing', 'refund', 'job_refund'].includes(m.type);
           return `
         <div class="py-2 text-sm flex justify-between items-start gap-2">
           <div class="${gone ? 'line-through text-slate-400' : ''}">
@@ -408,7 +427,7 @@ function viewCash(user) {
               ${minus ? '-' : ''}${cash.fmtRM(m.amount)}
             </div>
             ${
-              mgr && !gone && !['open', 'sale', 'refund'].includes(m.type)
+              mgr && !gone && !['open', 'sale', 'refund', 'job', 'job_refund'].includes(m.type)
                 ? `<button data-rev="${m.id}" class="text-xs text-red-600 underline">Batal</button>`
                 : ''
             }
@@ -488,7 +507,10 @@ const routes = {
   '/stock-in': viewStockIn,
   '/stock-count': viewStockCount,
   '/stock-adjust': viewStockAdjust,
-  '/jobs': soon('Job Order'),
+  '/jobs': viewJobs,
+  '/job-new': viewJobNew,
+  '/job': viewJob,
+  '/job-cancel': viewJobCancel,
   '/cash': viewCash,
   '/audit': viewAudit,
   '/users': viewUsers,
