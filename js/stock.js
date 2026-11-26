@@ -19,6 +19,8 @@ export const REASONS = {
   refund: 'Pulangan',
   adjust: 'Laras',
   count: 'Laras kiraan',
+  job: 'Guna dalam job',
+  job_return: 'Pulang dari job',
 };
 
 function me() {
