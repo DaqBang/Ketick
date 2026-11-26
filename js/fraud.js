@@ -18,6 +18,7 @@ export const CONFIG = {
   jobLongDays: 14, // aktif terlalu lama
   refundMinCount: 3,
   refundMinPct: 10, // % nilai jualan staf
+  customerRefundMin: 2, // pulangan ke pelanggan sama
   discountMinSales: 5,
   discountMinPct: 30, // % jualan staf yang ada diskaun
   cashShortBig: 5000, // sen, satu syif
@@ -124,6 +125,26 @@ export async function findings() {
         link: '#/sales',
       });
     }
+  }
+
+  // 3b. Pelanggan sama kerap dapat pulangan (pakat dengan staf / "kawan" juruwang)
+  const refundsByCustomer = groupBy(
+    refunds.filter((r) => saleById[r.sale_id]?.party),
+    (r) => saleById[r.sale_id].party.id
+  );
+  for (const [cid, list] of Object.entries(refundsByCustomer)) {
+    if (list.length < CONFIG.customerRefundMin) continue;
+    const party = saleById[list[0].sale_id].party;
+    const cashiers = [...new Set(list.map((r) => saleById[r.sale_id].user_name))];
+    add({
+      key: `refund_customer:${cid}:${list.length}`,
+      rule: 'refund_customer',
+      severity: 'medium',
+      title: `Pulangan berulang: ${party.name}`,
+      detail: `${list.length} pulangan (${fmtRM(list.reduce((a, r) => a + r.amount, 0))}) dalam ${CONFIG.windowDays} hari · juruwang: ${cashiers.join(', ')}.`,
+      link: `#/contact/${cid}`,
+      ts: list[list.length - 1].created_at,
+    });
   }
 
   // 4. Diskaun kerap ikut staf
