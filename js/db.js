@@ -11,6 +11,9 @@ const LOCKED = new Set([
   'refunds',
   'payments',
   'stock_moves',
+  'stock_receipts',
+  'stock_adjusts',
+  'stock_counts',
   'cash_moves',
 ]);
 
