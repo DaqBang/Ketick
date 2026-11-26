@@ -3,12 +3,14 @@ import * as auth from './auth.js';
 import * as cash from './cash.js';
 import * as sales from './sales.js';
 import * as products from './products.js';
+import * as stock from './stock.js';
 import { esc, go, refresh, toast, safe, fmtTime, input, btn, card } from './ui.js';
 
 // Troli kekal semasa tukar skrin (hilang bila refresh browser)
-const cart = { qty: {}, discount: '', method: 'cash', ref: '' };
+const cart = { qty: {}, serials: {}, discount: '', method: 'cash', ref: '' };
 
-const resetCart = () => Object.assign(cart, { qty: {}, discount: '', method: 'cash', ref: '' });
+const resetCart = () =>
+  Object.assign(cart, { qty: {}, serials: {}, discount: '', method: 'cash', ref: '' });
 
 // Buang produk yang sudah dinyahaktif dari troli
 function cartLines() {
@@ -16,7 +18,7 @@ function cartLines() {
     const p = products.find(id);
     if (!p || !p.active) delete cart.qty[id];
   }
-  return sales.buildLines(cart.qty);
+  return sales.buildLines(cart.qty, cart.serials);
 }
 
 const discountSen = () => {
@@ -28,7 +30,7 @@ const discountSen = () => {
   }
 };
 
-const approverFields = () => `
+export const approverFields = () => `
   <select name="approver" class="${input}">
     ${auth
       .approvers()
@@ -38,6 +40,21 @@ const approverFields = () => `
   <input name="approverPin" type="password" inputmode="numeric" maxlength="6" class="${input}" placeholder="PIN pelulus">`;
 
 // ---------- POS ----------
+
+// Satu pilihan siri bagi setiap unit produk bersiri
+function serialPickers(l) {
+  const p = products.find(l.product_id);
+  if (!p?.track_serial) return '';
+  const avail = stock.serialsInStock(p.id);
+  const chosen = cart.serials[p.id] || [];
+  return Array.from({ length: l.qty }, (_, i) => `
+    <select data-serial="${p.id}" data-i="${i}" class="${input} text-xs">
+      <option value="">Pilih no. siri ${i + 1}</option>
+      ${avail
+        .map((s) => `<option value="${esc(s)}" ${chosen[i] === s ? 'selected' : ''}>${esc(s)}</option>`)
+        .join('')}
+    </select>`).join('');
+}
 
 export function viewSales(user) {
   const list = products.list();
@@ -74,7 +91,8 @@ export function viewSales(user) {
         lines
           .map(
             (l) => `
-        <div class="flex justify-between items-center text-sm">
+        <div class="text-sm space-y-1">
+        <div class="flex justify-between items-center">
           <div>
             <div class="font-medium">${esc(l.name)}</div>
             <div class="text-xs text-slate-500">${cash.fmtRM(l.price)} × ${l.qty}</div>
@@ -85,6 +103,8 @@ export function viewSales(user) {
             <button type="button" data-inc="${l.product_id}" class="w-8 h-8 border rounded">+</button>
             <span class="w-20 text-right font-medium">${cash.fmtRM(l.line)}</span>
           </div>
+        </div>
+        ${serialPickers(l)}
         </div>`
           )
           .join('') || '<div class="text-sm text-slate-400">Troli kosong</div>'
@@ -163,8 +183,20 @@ export function viewSales(user) {
       document.querySelectorAll('[data-dec]').forEach(
         (b) =>
           (b.onclick = () => {
-            if (--cart.qty[b.dataset.dec] < 1) delete cart.qty[b.dataset.dec];
+            const id = b.dataset.dec;
+            if (--cart.qty[id] < 1) {
+              delete cart.qty[id];
+              delete cart.serials[id];
+            } else if (cart.serials[id]) {
+              cart.serials[id] = cart.serials[id].slice(0, cart.qty[id]);
+            }
             refresh();
+          })
+      );
+      document.querySelectorAll('[data-serial]').forEach(
+        (sel) =>
+          (sel.onchange = () => {
+            (cart.serials[sel.dataset.serial] ||= [])[Number(sel.dataset.i)] = sel.value;
           })
       );
       $('disc').oninput = (ev) => {
@@ -193,6 +225,7 @@ export function viewSales(user) {
           : { id: f.get('approver'), pin: f.get('approverPin') };
         const sale = await sales.checkout({
           qtyMap: cart.qty,
+          serialMap: cart.serials,
           discount,
           method: cart.method,
           payRef: cart.ref,
@@ -231,7 +264,8 @@ export function viewReceipt(user, id) {
           .map(
             (l) => `
           <div class="flex justify-between"><span>${esc(l.name)}</span><span>${cash.fmtRM(l.line)}</span></div>
-          <div class="text-xs text-slate-500">${l.qty} × ${cash.fmtRM(l.price)}</div>`
+          <div class="text-xs text-slate-500">${l.qty} × ${cash.fmtRM(l.price)}</div>
+          ${l.serials?.length ? `<div class="text-xs">SN: ${l.serials.map(esc).join(', ')}</div>` : ''}`
           )
           .join('')}
       </div>
@@ -332,6 +366,10 @@ export function viewProducts(user, id) {
         <input name="price" inputmode="decimal" class="${input}" placeholder="Harga jual (RM)" value="${rm(editing?.price)}" required>
         <input name="cost" inputmode="decimal" class="${input}" placeholder="Kos (RM)" value="${rm(editing?.cost)}" required>
       </div>
+      <label class="flex items-center gap-2 text-sm">
+        <input type="checkbox" name="track_serial" ${editing?.track_serial ? 'checked' : ''}>
+        Jejak nombor siri (kamera, phone, laptop)
+      </label>
       ${editing ? '<div class="text-xs text-amber-700">Perubahan harga direkod dalam audit.</div>' : ''}
       <button class="${btn}">${editing ? 'Simpan' : 'Tambah'}</button>
       ${editing ? '<a href="#/products" class="block text-center text-sm text-slate-500">Batal edit</a>' : ''}
@@ -347,7 +385,7 @@ export function viewProducts(user, id) {
         <div class="py-2 flex justify-between items-center text-sm">
           <div class="${p.active ? '' : 'line-through text-slate-400'}">
             <div class="font-medium">${esc(p.name)}</div>
-            <div class="text-xs text-slate-500">${esc(p.sku) || '—'}${
+            <div class="text-xs text-slate-500">${p.track_serial ? 'Bersiri · ' : ''}${esc(p.sku) || '—'}${
               mgr ? ` · kos ${cash.fmtRM(p.cost)}` : ''
             }</div>
           </div>
@@ -379,6 +417,7 @@ export function viewProducts(user, id) {
             sku: d.sku,
             price: cash.toSen(d.price),
             cost: cash.toSen(d.cost),
+            track_serial: d.track_serial === 'on',
           });
           toast(editing ? 'Produk dikemas kini' : 'Produk ditambah', 'ok');
           if (editing) go('/products');
