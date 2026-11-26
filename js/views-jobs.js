@@ -5,6 +5,10 @@ import * as stock from './stock.js';
 import * as products from './products.js';
 import * as jobs from './jobs.js';
 import { approverFields } from './views-sales.js';
+import * as contacts from './customers.js';
+import * as settings from './settings.js';
+import { sharePdf } from './share.js';
+import { contactButtons, wireContactButtons } from './views-crm.js';
 import { esc, go, refresh, toast, safe, fmtTime, input, btn, card } from './ui.js';
 
 const BADGE = {
@@ -67,7 +71,9 @@ export function viewJobs(user, filter) {
 
 // ---------- Job baru ----------
 
-export function viewJobNew(user) {
+// param: id kenalan (dari skrin CRM) untuk pilih pelanggan terus
+export function viewJobNew(user, contactId) {
+  const people = contacts.list({ kind: 'customer' });
   return {
     html: `
     <form id="f" class="${card} space-y-3">
@@ -75,8 +81,15 @@ export function viewJobNew(user) {
       <select name="type" class="${input}">
         ${Object.entries(jobs.TYPES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}
       </select>
-      <input name="customer" class="${input}" placeholder="Nama pelanggan" required>
-      <input name="phone" type="tel" class="${input}" placeholder="No. telefon" required>
+      <select name="contactId" id="contactId" class="${input}">
+        <option value="">Pelanggan baru (isi di bawah)</option>
+        ${people.map((c) => `<option value="${c.id}" ${c.id === contactId ? 'selected' : ''}>${esc(c.name)} · ${esc(c.phone)}</option>`).join('')}
+      </select>
+      <div id="newCust" class="space-y-3 ${contactId ? 'hidden' : ''}">
+        <input name="customer" class="${input}" placeholder="Nama pelanggan">
+        <input name="phone" type="tel" class="${input}" placeholder="No. telefon">
+        <div class="text-xs text-slate-500">Pelanggan baru akan didaftar dalam CRM secara automatik. Jika no. telefon sudah wujud, rekod sedia ada digunakan.</div>
+      </div>
       <input name="device" class="${input}" placeholder="Peranti (cth: iPhone 13, DVR 8ch)">
       <input name="deviceSerial" class="${input}" placeholder="Siri / IMEI peranti pelanggan (repair)">
       <input name="address" class="${input}" placeholder="Alamat tapak (pemasangan)">
@@ -88,6 +101,8 @@ export function viewJobNew(user) {
       <button class="${btn}">Cipta Job</button>
     </form>`,
     mount() {
+      document.getElementById('contactId').onchange = (e) =>
+        document.getElementById('newCust').classList.toggle('hidden', !!e.target.value);
       document.getElementById('f').onsubmit = safe(async (ev) => {
         ev.preventDefault();
         const job = await jobs.create(Object.fromEntries(new FormData(ev.target)));
@@ -123,15 +138,36 @@ export function viewJob(user, id) {
   const edit = !s.locked;
   const next = { open: ['in_progress', 'Mula kerja'], in_progress: ['done', 'Tanda siap'], done: ['in_progress', 'Buka semula'] }[s.status];
   const sel = products.find(partForm.productId);
+  const co = settings.get();
+  const contact = (job.contact_id && contacts.find(job.contact_id)) || { name: job.customer, phone: job.phone };
+  const msg = [
+    `Salam ${job.customer},`,
+    '',
+    `${co.company}: ${jobs.TYPES[job.type]} ${job.no}${job.device ? ` (${job.device})` : ''}`,
+    `Status: ${jobs.STATUS[s.status]}`,
+    s.total ? `Jumlah: ${cash.fmtRM(s.total)} · Dibayar: ${cash.fmtRM(s.paid)} · Baki: ${cash.fmtRM(s.due)}` : '',
+    s.status === 'done' ? 'Kerja sudah siap dan boleh diambil / diserahkan.' : '',
+    co.bank_acc && s.due > 0 ? `Bayaran ke: ${co.bank_name} ${co.bank_acc} (${co.bank_holder})` : '',
+    '',
+    'Terima kasih.',
+  ]
+    .filter((x, i, a) => x || (i > 0 && a[i - 1]))
+    .join('\n');
 
   return {
     html: `
+    <div id="jobsheet" class="space-y-4">
     <div class="${card} space-y-1 text-sm">
+      <div class="text-xs text-slate-500">${esc(co.company)}${co.phone ? ' · ' + esc(co.phone) : ''}</div>
       <div class="flex justify-between items-center">
         <div class="font-bold text-base">${job.no} · ${jobs.TYPES[job.type]}</div>
         ${badge(s.status)}
       </div>
-      <div><b>${esc(job.customer)}</b> · <a href="tel:${esc(job.phone)}" class="underline">${esc(job.phone)}</a></div>
+      <div>${
+        job.contact_id
+          ? `<a href="#/contact/${job.contact_id}" class="font-bold underline">${esc(job.customer)}</a>`
+          : `<b>${esc(job.customer)}</b>`
+      } · ${esc(job.phone)}</div>
       ${job.device ? `<div>Peranti: ${esc(job.device)}${job.device_serial ? ` · SN ${esc(job.device_serial)}` : ''}</div>` : ''}
       ${job.address ? `<div>Alamat: ${esc(job.address)}</div>` : ''}
       <div>Masalah / skop: ${esc(job.problem)}</div>
@@ -180,6 +216,13 @@ export function viewJob(user, id) {
           <span>Baki</span><span>${cash.fmtRM(s.due)}</span>
         </div>
       </div>
+    </div>
+    </div>
+
+    <div class="print:hidden ${card} space-y-2">
+      <h2 class="font-bold text-sm">Hantar kepada ${esc(job.customer)}</h2>
+      <button id="sharePdf" class="${btn}">📄 Kongsi PDF job sheet</button>
+      ${contactButtons(contact, { text: msg, subject: `${job.no} · ${jobs.STATUS[s.status]}` })}
     </div>
 
     ${
@@ -269,6 +312,12 @@ export function viewJob(user, id) {
     mount() {
       const $ = (x) => document.getElementById(x);
       $('print').onclick = () => window.print();
+      wireContactButtons(msg);
+      $('sharePdf').onclick = safe(async () => {
+        toast('Menjana PDF…', 'ok');
+        const res = await sharePdf($('jobsheet'), `${job.no}.pdf`, msg);
+        if (res === 'downloaded') toast('PDF dimuat turun. Lampirkan dalam chat.', 'ok');
+      });
       if (!edit) return;
 
       document.querySelectorAll('[data-status]').forEach(
