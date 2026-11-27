@@ -41,7 +41,7 @@ export function viewJobs(user, filter) {
     <div class="grid grid-cols-3 gap-2 text-center text-sm">
       ${TABS.map(
         ([k, l]) =>
-          `<a href="#/jobs/${k}" class="rounded-lg py-2 ${k === f ? 'bg-slate-900 text-white' : 'bg-white'}">${l}</a>`
+          `<a href="#/jobs/${k}" class="rounded-lg py-2 ${k === f ? 'bg-brand-900 text-white' : 'bg-white'}">${l}</a>`
       ).join('')}
     </div>
     <div class="${card} divide-y">
