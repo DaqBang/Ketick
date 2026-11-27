@@ -33,7 +33,7 @@ export function viewBilling(user, type) {
   return {
     html: `
     <div class="grid grid-cols-3 gap-2 text-center text-xs">
-      ${TABS.map((k) => `<a href="#/billing/${k}" class="rounded-lg py-2 ${k === ty ? 'bg-slate-900 text-white' : 'bg-white'}">${T[k].label}</a>`).join('')}
+      ${TABS.map((k) => `<a href="#/billing/${k}" class="rounded-lg py-2 ${k === ty ? 'bg-brand-900 text-white' : 'bg-white'}">${T[k].label}</a>`).join('')}
     </div>
     ${
       billing.DRAFTABLE.includes(ty)
