@@ -32,6 +32,25 @@
 </head>
 <body class="font-sans text-slate-900 antialiased">
   <div id="app"></div>
-  <script type="module" src="js/app.js"></script>
+  <script>
+    // Papar ralat di skrin (bukan skrin kosong) supaya mudah dikesan dari phone
+    function showBootError(msg) {
+      var el = document.getElementById('boot-error') || document.createElement('div');
+      el.id = 'boot-error';
+      el.style.cssText = 'position:fixed;inset:auto 12px 12px 12px;z-index:9999;background:#fff;color:#b91c1c;' +
+        'padding:14px;border-radius:14px;font:13px/1.4 monospace;white-space:pre-wrap;box-shadow:0 10px 30px rgba(0,0,0,.5)';
+      el.textContent = 'Ralat memuat app:\n' + msg +
+        '\n\nCuba: tarik untuk refresh / buka tab inkognito. Jika masih, hantar mesej ini.';
+      document.body.appendChild(el);
+    }
+    window.addEventListener('error', function (e) {
+      showBootError((e.message || 'ralat') + (e.filename ? '\n@ ' + e.filename.split('/').slice(-2).join('/') + ':' + e.lineno : ''));
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      showBootError(String(e.reason && (e.reason.stack || e.reason)));
+    });
+  </script>
+  <script type="module" src="js/app.js"
+    onerror="showBootError('Gagal muat salah satu fail JS (404?). Semak semua fail dalam folder js/ sudah di-push.')"></script>
 </body>
 </html>
