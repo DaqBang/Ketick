@@ -55,7 +55,7 @@ export function viewCrm(user, kind) {
     <a href="#/crm-edit/new-${k}" class="${btn} block text-center">+ ${contacts.KINDS[k]} Baru</a>
     <div class="grid grid-cols-2 gap-2 text-center text-sm">
       ${Object.entries(contacts.KINDS)
-        .map(([key, l]) => `<a href="#/crm/${key}" class="rounded-lg py-2 ${key === k ? 'bg-slate-900 text-white' : 'bg-white'}">${l}</a>`)
+        .map(([key, l]) => `<a href="#/crm/${key}" class="rounded-lg py-2 ${key === k ? 'bg-brand-900 text-white' : 'bg-white'}">${l}</a>`)
         .join('')}
     </div>
     <input id="q" class="${input}" placeholder="Cari nama / syarikat / telefon">
