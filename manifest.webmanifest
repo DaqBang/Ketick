@@ -1,0 +1,23 @@
+{
+  "name": "Kawal ERP",
+  "short_name": "Kawal",
+  "description": "ERP anti-fraud untuk SME: POS, job, stok, billing, CRM.",
+  "id": "./",
+  "start_url": "./#/",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#050b1f",
+  "theme_color": "#050b1f",
+  "lang": "ms",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Jualan baru", "url": "./#/sales", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Job baru", "url": "./#/job-new", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Invois", "url": "./#/billing/INV", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
